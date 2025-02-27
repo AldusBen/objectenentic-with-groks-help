@@ -1,0 +1,77 @@
+import random
+from mesa import Agent, Model
+
+class MyAgent(Agent):
+    def __init__(self, unique_id, model, gender, positions):
+        super().__init__(unique_id, model)
+        self.life_bank = 120
+        self.gender = gender  # 0 for female, 1 for male
+        self.positions = positions  # List of 10 values, 0-7
+        self.turn_count = 0
+        self.offspring_not_coupled = []  # List of offspring that haven't coupled yet
+
+    def step(self):
+        self.turn_count += 1
+        # Check coupling window and decide to couple or not
+        if self.can_couple():
+            if self.decide_to_couple():  # Simple decision, could be more complex
+                self.couple()
+        else:
+            self.apply_end_window_penalty()
+
+    def can_couple(self):
+        return (self.gender == 0 and self.turn_count < 20) or (self.gender == 1 and self.turn_count < 60)
+
+    def decide_to_couple(self):
+        # For simplicity, always try to couple if can
+        return True
+
+    def couple(self):
+        # Find a partner of opposite gender who also wants to couple
+        potential_partners = [agent for agent in self.model.schedule.agents 
+                            if agent.gender != self.gender and agent.can_couple() and agent.decide_to_couple()]
+        if potential_partners:
+            partner = random.choice(potential_partners)
+            # Create offspring
+            offspring = self.create_offspring(partner)
+            self.model.schedule.add(offspring)
+            # Adjust life banks
+            self.life_bank += 2 if self.gender == 1 else 5  # Male: +2, Female: +5 at coupling
+            partner.life_bank += 2 if partner.gender == 1 else 5
+            self.offspring_not_coupled.append(offspring)
+            partner.offspring_not_coupled.append(offspring)
+
+    def create_offspring(self, partner):
+        # Set position 0 (gender) randomly
+        offspring_gender = random.choice([0, 1])
+        # Set position 9 from opposite gender parent
+        opposite_parent = partner if offspring_gender == 0 else self  # Female offspring, male parent
+        positions = [0] * 10  # Initialize
+        positions[0] = offspring_gender
+        positions[9] = opposite_parent.positions[9]
+        # Each parent passes 5 random positions
+        father_positions = random.sample(range(10), 5) if self.gender == 1 else random.sample(range(10), 5)
+        mother_positions = random.sample(range(10), 5) if partner.gender == 0 else random.sample(range(10), 5)
+        # Set positions, mother's values override if conflict
+        for pos in father_positions:
+            if pos not in [0, 9]:  # Ignore position 0 and 9 for passing
+                positions[pos] = self.positions[pos]
+        for pos in mother_positions:
+            if pos not in [0, 9]:  # Ignore position 0 and 9 for passing
+                positions[pos] = partner.positions[pos]
+        # Apply mutation
+        for i in range(10):
+            if random.random() < 1/10000:
+                positions[i] = (positions[i] + 1) % 8
+        return MyAgent(self.model.next_id(), self.model, offspring_gender, positions)
+
+    def apply_end_window_penalty(self):
+        if self.gender == 0 and self.turn_count == 20:
+            self.life_bank -= 3
+        elif self.gender == 1 and self.turn_count == 60:
+            self.life_bank -= 5
+
+    def update_life_bank(self):
+        # Deduct -1 per turn for each offspring not yet coupled
+        self.life_bank -= len(self.offspring_not_coupled)
+        # Remove offspring that have coupled (simplified, need to track coupling)
